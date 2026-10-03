@@ -1,0 +1,4 @@
+# LF in the working tree on every platform, so shell scripts, gradlew and YAML work inside Linux containers
+# even when Git for Windows would otherwise check them out with CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf

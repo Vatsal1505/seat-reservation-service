@@ -1,0 +1,42 @@
+# Render Blueprint: one Docker web service and its Postgres, connected over Render's internal network.
+databases:
+  - name: seats-db
+    databaseName: seats
+    user: seats
+    plan: free
+    ipAllowList: []   # internal connections only; add your own IP here to connect with psql
+
+services:
+  - type: web
+    name: seat-reservation-service
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health/readiness
+    envVars:
+      - key: PORT
+        value: "8080"
+      # Sized for the 512 MB free instance: with G1 and a 60% heap the container was OOM-killed under the full
+      # burst; a smaller heap, the serial collector and small thread stacks survived it.
+      - key: JAVA_TOOL_OPTIONS
+        value: "-XX:MaxRAMPercentage=50 -XX:+UseSerialGC -Xss512k"
+      - key: DB_HOST
+        fromDatabase:
+          name: seats-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: seats-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: seats-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: seats-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: seats-db
+          property: password
