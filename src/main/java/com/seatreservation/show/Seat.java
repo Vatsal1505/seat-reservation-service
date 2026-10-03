@@ -49,6 +49,20 @@ public class Seat implements Persistable<SeatId> {
         return seat;
     }
 
+    public void hold(UUID reservationId, String userId, Instant now) {
+        this.status = SeatStatus.HELD;
+        this.reservationId = reservationId;
+        this.userId = userId;
+        this.updatedAt = now;
+    }
+
+    public void release(Instant now) {
+        this.status = SeatStatus.AVAILABLE;
+        this.reservationId = null;
+        this.userId = null;
+        this.updatedAt = now;
+    }
+
     @Override
     public SeatId getId() {
         return id;

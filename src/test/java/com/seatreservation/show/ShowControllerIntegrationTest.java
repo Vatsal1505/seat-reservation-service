@@ -57,7 +57,7 @@ class ShowControllerIntegrationTest {
 
     @BeforeEach
     void cleanTables() {
-        jdbc.execute("TRUNCATE reservation_events, seats, reservations, shows CASCADE");
+        jdbc.execute("TRUNCATE seats, reservations, shows CASCADE");
     }
 
     @Test

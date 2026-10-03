@@ -41,7 +41,7 @@ class SchemaMigrationTest {
 
     @BeforeEach
     void cleanTables() {
-        jdbc.execute("TRUNCATE reservation_events, seats, reservations, shows CASCADE");
+        jdbc.execute("TRUNCATE seats, reservations, shows CASCADE");
     }
 
     @Test
@@ -52,7 +52,7 @@ class SchemaMigrationTest {
                         + "ORDER BY table_name",
                 String.class);
 
-        assertEquals(List.of("reservation_events", "reservations", "seats", "shows"), tables);
+        assertEquals(List.of("reservations", "seats", "shows"), tables);
     }
 
     @ParameterizedTest
@@ -152,29 +152,6 @@ class SchemaMigrationTest {
         assertDoesNotThrow(() -> insertReservation(secondShow, "user-1", "key-1"));
     }
 
-    @Test
-    void insertReservationEvent_expiryWithoutUser_isAccepted() {
-        UUID showId = insertShow(25000);
-        UUID reservationId = insertReservation(showId, "user-1", "key-1");
-
-        assertDoesNotThrow(() -> insertReservationEvent(reservationId, "EXPIRED", null));
-    }
-
-    @Test
-    void insertReservationEvent_unknownType_isRejected() {
-        UUID showId = insertShow(25000);
-        UUID reservationId = insertReservation(showId, "user-1", "key-1");
-
-        assertRejectedBy("reservation_events_event_type_check",
-                () -> insertReservationEvent(reservationId, "REFUNDED", "user-1"));
-    }
-
-    @Test
-    void insertReservationEvent_unknownReservation_isRejected() {
-        assertRejectedBy("reservation_events_reservation_id_fkey",
-                () -> insertReservationEvent(UUID.randomUUID(), "RESERVED", "user-1"));
-    }
-
     private static void assertRejectedBy(String constraint, Executable insert) {
         var ex = assertThrows(DataIntegrityViolationException.class, insert);
         assertTrue(ex.getMessage().contains(constraint), ex.getMessage());
@@ -197,11 +174,6 @@ class SchemaMigrationTest {
                         + "VALUES (?, ?, ?, ?, '{A1}'::text[], 25000, ?, now() + interval '5 minutes')",
                 id, showId, userId, key, status);
         return id;
-    }
-
-    private static void insertReservationEvent(UUID reservationId, String eventType, String userId) {
-        jdbc.update("INSERT INTO reservation_events (reservation_id, event_type, user_id) VALUES (?, ?, ?)",
-                reservationId, eventType, userId);
     }
 
     private static void insertAvailableSeat(UUID showId, String label) {
