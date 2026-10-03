@@ -1,5 +1,6 @@
 package com.seatreservation.reservation;
 
+import com.seatreservation.error.ApiException;
 import com.seatreservation.security.AuthenticatedUser;
 import jakarta.validation.Valid;
 import java.util.UUID;
@@ -16,9 +17,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class ReservationController {
 
     private final ReservationService reservationService;
+    private final ReservationMetrics metrics;
 
-    public ReservationController(ReservationService reservationService) {
+    public ReservationController(ReservationService reservationService, ReservationMetrics metrics) {
         this.reservationService = reservationService;
+        this.metrics = metrics;
     }
 
     @PostMapping("/shows/{showId}/reserve")
@@ -26,8 +29,15 @@ public class ReservationController {
     @ResponseStatus(HttpStatus.CREATED)
     public ReservationResponse reserve(@PathVariable UUID showId, @AuthenticationPrincipal AuthenticatedUser user,
             @Valid @RequestBody ReserveRequest request) {
-        Reservation reservation = reservationService.reserve(
-                showId, user.userId(), request.distinctSeatLabels(), request.idempotencyKey());
+        Reservation reservation;
+        try {
+            reservation = reservationService.reserve(
+                    showId, user.userId(), request.distinctSeatLabels(), request.idempotencyKey());
+        } catch (ApiException ex) {
+            metrics.declined(ex.reason());
+            throw ex;
+        }
+        metrics.created();
         return ReservationResponse.of(reservation);
     }
 

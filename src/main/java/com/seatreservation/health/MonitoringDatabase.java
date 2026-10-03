@@ -39,6 +39,11 @@ public class MonitoringDatabase implements AutoCloseable {
         jdbc.queryForObject("SELECT 1", Integer.class);
     }
 
+    public long countAvailableSeats() {
+        Long count = jdbc.queryForObject("SELECT count(*) FROM seats WHERE status = 'AVAILABLE'", Long.class);
+        return count == null ? 0 : count;
+    }
+
     @Override
     public void close() {
         dataSource.close();

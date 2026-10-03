@@ -1,5 +1,6 @@
 package com.seatreservation.reservation;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.jayway.jsonpath.JsonPath;
+import com.seatreservation.logging.RequestIdFilter;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -558,6 +560,68 @@ class ReservationControllerIntegrationTest {
     }
 
     @Test
+    void metrics_createdReserveAndItsReplay_countsBothAndSeatsAvailableDrops() throws Exception {
+        String showId = createShow(10);
+        double createdBefore = metric(reservations("created", "none"));
+
+        reserved(ALICE, showId, "k1", "A1", "A2");
+
+        assertEquals(1.0, metric(reservations("created", "none")) - createdBefore, 0.0);
+        assertEquals(8.0, metric("seats_available"), 0.0);
+
+        assertEquals(201, reserve(ALICE, showId, body("k1", "A1", "A2")).status());
+
+        assertEquals(2.0, metric(reservations("created", "none")) - createdBefore, 0.0);
+        assertEquals(8.0, metric("seats_available"), 0.0);
+    }
+
+    @Test
+    void metrics_seatHeldBySomeoneElse_countsDeclinedWithReasonAndNotCreated() throws Exception {
+        String showId = createShow(10);
+        reserved(BOB, showId, "bob-1", "A1");
+        double createdBefore = metric(reservations("created", "none"));
+        double declinedBefore = metric(reservations("declined", "SEATS_UNAVAILABLE"));
+
+        assertEquals(409, reserve(ALICE, showId, body("k1", "A1")).status());
+
+        assertEquals(1.0, metric(reservations("declined", "SEATS_UNAVAILABLE")) - declinedBefore, 0.0);
+        assertEquals(0.0, metric(reservations("created", "none")) - createdBefore, 0.0);
+    }
+
+    @Test
+    void metrics_unknownShowAndDuplicateLabels_countDeclinedWithTheirOwnReasons() throws Exception {
+        String showId = createShow(10);
+        double notFoundBefore = metric(reservations("declined", "SHOW_NOT_FOUND"));
+        double duplicateBefore = metric(reservations("declined", "DUPLICATE_SEATS"));
+
+        assertEquals(404, reserve(ALICE, UUID.randomUUID().toString(), body("k1", "A1")).status());
+        assertEquals(400, reserve(ALICE, showId, body("k2", "A1", "A1")).status());
+
+        assertEquals(1.0, metric(reservations("declined", "SHOW_NOT_FOUND")) - notFoundBefore, 0.0);
+        assertEquals(1.0, metric(reservations("declined", "DUPLICATE_SEATS")) - duplicateBefore, 0.0);
+    }
+
+    @Test
+    void reserve_anyOutcome_carriesRequestIdHeaderThatIsEchoedWhenSuppliedAndPresentOn401() throws Exception {
+        String showId = createShow(10);
+
+        String generated = mockMvc.perform(reserveRequest(ALICE, showId, body("k1", "A1")))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists(RequestIdFilter.HEADER))
+                .andReturn().getResponse().getHeader(RequestIdFilter.HEADER);
+        assertDoesNotThrow(() -> UUID.fromString(generated));
+
+        mockMvc.perform(reserveRequest(ALICE, showId, body("k2", "A2"))
+                        .header(RequestIdFilter.HEADER, "trace-abc.123"))
+                .andExpect(status().isCreated())
+                .andExpect(header().string(RequestIdFilter.HEADER, "trace-abc.123"));
+
+        mockMvc.perform(reserveRequest(null, showId, body("k3", "A3")))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().exists(RequestIdFilter.HEADER));
+    }
+
+    @Test
     void reserve_replayOfCancelledReservation_returns409NotActive() throws Exception {
         String showId = createShow(10);
         String id = reserved(ALICE, showId, "k1", "A1");
@@ -650,6 +714,22 @@ class ReservationControllerIntegrationTest {
     private String reservationStatus(String reservationId) {
         return jdbc.queryForObject("SELECT status FROM reservations WHERE id = ?", String.class,
                 UUID.fromString(reservationId));
+    }
+
+    private static String reservations(String outcome, String reason) {
+        return "reservations_total{outcome=\"" + outcome + "\",reason=\"" + reason + "\"}";
+    }
+
+    /** Scrapes without a token, which also proves the endpoint is open; an absent series counts as zero. */
+    private double metric(String seriesPrefix) throws Exception {
+        String scrape = mockMvc.perform(get("/actuator/prometheus"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return scrape.lines()
+                .filter(line -> line.startsWith(seriesPrefix + " "))
+                .mapToDouble(line -> Double.parseDouble(line.substring(line.lastIndexOf(' ') + 1)))
+                .findFirst()
+                .orElse(0.0);
     }
 
     private static void awaitLatch(CountDownLatch latch) {
