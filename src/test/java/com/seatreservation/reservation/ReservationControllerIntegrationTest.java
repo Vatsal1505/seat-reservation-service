@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -41,8 +42,11 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
-// The sweeper interval is pushed out so the background job cannot race tests that drive expiry by hand.
-@SpringBootTest(properties = "reservation.sweep-interval=PT1H")
+// The sweeper interval is pushed out so the background job cannot race tests that drive expiry by hand,
+// and the lock timeout is shortened so the test of a timed-out lock does not wait the production 10 seconds.
+@SpringBootTest(properties = {
+        "reservation.sweep-interval=PT1H",
+        "spring.datasource.hikari.connection-init-sql=SET lock_timeout = '2s'"})
 @AutoConfigureMockMvc
 @Testcontainers
 class ReservationControllerIntegrationTest {
@@ -103,6 +107,37 @@ class ReservationControllerIntegrationTest {
         assertEquals(1, jdbc.queryForObject(
                 "SELECT count(*) FROM reservations WHERE updated_at >= ?", Integer.class, requestStart));
         assertConsistent(showId);
+    }
+
+    @Test
+    void reserve_seatLockHeldPastLockTimeout_returns503AndLeavesNothingBehind() throws Exception {
+        String showId = createShow(10);
+        CountDownLatch seatLocked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<?> holder = pool.submit(() -> transaction.executeWithoutResult(status -> {
+                seatLocker.lockSeats(UUID.fromString(showId), List.of("A1"));
+                seatLocked.countDown();
+                awaitLatch(release);
+            }));
+            assertTrue(seatLocked.await(10, TimeUnit.SECONDS), "holder never locked A1");
+
+            mockMvc.perform(reserveRequest(ALICE, showId, body("k1", "A1")))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(header().string(HttpHeaders.RETRY_AFTER, "1"))
+                    .andExpect(jsonPath("$.reason").value("DATABASE_UNAVAILABLE"));
+
+            assertEquals(0, count("SELECT count(*) FROM reservations"));
+            assertEquals(10, count("SELECT count(*) FROM seats WHERE status = 'AVAILABLE'"));
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            assertEquals(201, reserve(ALICE, showId, body("k1", "A1")).status());
+            assertConsistent(showId);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
     }
 
     @Test
@@ -615,6 +650,15 @@ class ReservationControllerIntegrationTest {
     private String reservationStatus(String reservationId) {
         return jdbc.queryForObject("SELECT status FROM reservations WHERE id = ?", String.class,
                 UUID.fromString(reservationId));
+    }
+
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            latch.await();
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(ex);
+        }
     }
 
     /** available + held + confirmed must equal total, and every owned seat must belong to a matching reservation. */

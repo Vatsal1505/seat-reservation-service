@@ -25,6 +25,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(requests -> requests
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers("/actuator/health/**").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(new MockTokenAuthFilter(problemHandler), BasicAuthenticationFilter.class)
                 .exceptionHandling(handling -> handling

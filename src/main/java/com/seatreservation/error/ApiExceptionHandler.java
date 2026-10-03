@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.TransientDataAccessException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
@@ -11,6 +13,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -37,6 +40,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     ProblemDetail handleAccessDenied(AccessDeniedException ex) {
         return problem(HttpStatus.FORBIDDEN, "FORBIDDEN", "The token does not allow this operation.");
+    }
+
+    @ExceptionHandler({CannotCreateTransactionException.class, DataAccessResourceFailureException.class,
+            TransientDataAccessException.class})
+    ResponseEntity<ProblemDetail> handleDatabaseUnavailable(Exception ex) {
+        log.warn("database unavailable. type={}", ex.getClass().getSimpleName());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, "1")
+                .body(problem(HttpStatus.SERVICE_UNAVAILABLE, "DATABASE_UNAVAILABLE",
+                        "The database is temporarily unavailable; retry shortly."));
     }
 
     @ExceptionHandler(Exception.class)

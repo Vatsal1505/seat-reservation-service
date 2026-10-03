@@ -7,12 +7,13 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /** The only place seats are locked, so every code path shares one lock order. */
-@Component
+// @Repository so JPA failures are translated to Spring's exceptions, which ApiExceptionHandler maps to 503.
+@Repository
 public class SeatLocker {
 
     private final EntityManager entityManager;
