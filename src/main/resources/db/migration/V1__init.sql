@@ -12,7 +12,7 @@ CREATE TABLE reservations (
     idempotency_key  text        NOT NULL,
     seat_labels      text[]      NOT NULL,
     total_paise      bigint      NOT NULL CHECK (total_paise > 0),
-    status           text        NOT NULL CHECK (status IN ('HELD', 'CONFIRMED', 'CANCELLED', 'EXPIRED')),
+    status           text        NOT NULL CHECK (status IN ('HELD', 'CANCELLED', 'EXPIRED')),
     expires_at       timestamptz NOT NULL,
     created_at       timestamptz NOT NULL DEFAULT now(),
     updated_at       timestamptz NOT NULL DEFAULT now(),
@@ -34,5 +34,4 @@ CREATE TABLE seats (
 );
 
 CREATE INDEX idx_seats_show_user ON seats (show_id, user_id) WHERE user_id IS NOT NULL;
-CREATE INDEX idx_seats_reservation ON seats (reservation_id) WHERE reservation_id IS NOT NULL;
 CREATE INDEX idx_reservations_held_expiry ON reservations (expires_at) WHERE status = 'HELD';

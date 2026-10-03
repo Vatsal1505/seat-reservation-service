@@ -82,10 +82,6 @@ public class Reservation {
         return userId;
     }
 
-    public String getIdempotencyKey() {
-        return idempotencyKey;
-    }
-
     public List<String> getSeatLabels() {
         return seatLabels;
     }
@@ -103,7 +99,7 @@ public class Reservation {
     }
 
     public boolean isActive() {
-        return status == ReservationStatus.HELD || status == ReservationStatus.CONFIRMED;
+        return status == ReservationStatus.HELD;
     }
 
     public void markCancelled(Instant now) {
